@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Show Water Users</title>
+    <meta
+      property="og:description"
+      content="Draw points from a GeoJSON collection to a map."
+    />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css"
+    />
+    <script src="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body,
+      #map {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      function getPointFromGML(str) {
+        const parser = new DOMParser();
+        const gml = parser.parseFromString(str, "text/xml");
+        const point = gml.getElementsByTagName("gml:coord")[0];
+        const x = point.getElementsByTagName("gml:X")[0].firstChild.nodeValue;
+        const y = point.getElementsByTagName("gml:Y")[0].firstChild.nodeValue;
+        return [parseFloat(x), parseFloat(y)];
+      }
+
+      function buildGeoJsonFromGML(e) {
+        const geom = getPointFromGML(e.geom);
+        delete e.geom;
+        return {
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: geom,
+          },
+          properties: {
+            ...e,
+          },
+        };
+      }
+      const mapStyle = {
+        glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            attribution: "&copy; OpenStreetMap Contributors",
+            maxzoom: 19,
+          },
+          pg_basins: {
+            type: "vector",
+            url: `http://65.108.129.20:8088/pg_basins`,
+            minZoom: 4,
+            maxzoom: 19,
+          },
+        },
+        layers: [
+          {
+            id: "base-osm",
+            type: "raster",
+            source: "osm",
+            layout: {
+              visibility: "visible",
+            },
+          },
+          {
+            layout: {
+              visibility: "visible",
+            },
+            id: "Basins",
+            type: "line",
+            source: "pg_basins",
+            "source-layer": "pg_basins",
+            paint: {
+              "line-color": "#cc33ff",
+              "line-width": 2,
+            },
+          },
+        ],
+      };
+      const map = new maplibregl.Map({
+        container: "map",
+        style: mapStyle,
+        tap: false,
+        center: [85, 28.5],
+        zoom: 7,
+        minZoom: 4,
+        maxBounds: [
+          [77, 25.2],
+          [90.3, 31.6],
+        ],
+      });
+
+      map.on("load", async () => {
+        const response = await fetch(
+          "http://65.108.129.20:8800/nodes/getWaterUserNodes?basin_code=karna",
+          {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization:
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6ImRzcyIsIm5iZiI6MTcwNjUwODUwMSwiZXhwIjoxNzE5NDY4NTAxLCJpYXQiOjE3MDY1MDg1MDF9.edVzhyI60QllUUC8cU4ymjbPOBE9_KEEjhYTzaRL1-o",
+            },
+          }
+        ).then((res) => res.json());
+        const waterUserNodes = response.map(buildGeoJsonFromGML);
+        const waterUserGeoJson = {
+          type: "FeatureCollection",
+          features: waterUserNodes,
+        };
+
+        map.addSource("waterUserNodes", {
+          type: "geojson",
+          data: waterUserGeoJson,
+        });
+        const domesticWu = await map.loadImage(
+          `http://127.0.0.1:5500/icons/domestic_wu.png`
+        );
+        const irrigationWu = await map.loadImage(
+          `http://127.0.0.1:5500/icons/irrigation_wu.png`
+        );
+        
+        map.addImage("irrigationWU", irrigationWu.data);
+        map.addImage("domesticWU", domesticWu.data);
+
+        map.addLayer({
+          id: "waterUserNodes",
+          type: "symbol",
+          source: "waterUserNodes",
+          layout: {
+            "icon-image": [
+              "match",
+              ["get", "usertype"],
+              1,
+              "domesticWU",
+              2,
+              "irrigationWU",
+              "domesticWU",
+            ],
+            "icon-size": 0.2,
+            "icon-allow-overlap": true,
+          },
+        });
+      });
+    </script>
+  </body>
+</html>
